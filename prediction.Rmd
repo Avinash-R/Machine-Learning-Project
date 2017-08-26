@@ -1,0 +1,147 @@
+# Predicting How Well An Exercise Is Done
+
+## Background: 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and Predict how well an exercise is done. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+The data for this project and its description come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. 
+
+
+## Data Analysis:
+The flow of data analysis is broadly into 5 stages: loading, cleaning splicing, fitting and predicting. They are detailed as below:
+
+### 1. Loading Data
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data for quiz are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data is downloaded into the working directory. As the data is in .csv format, read.csv ( ) is used to load the training data and quiz testing data.
+
+```{r loading}
+training <- read.csv ("pml-training.csv")
+quiztesting <- read.csv ("pml-testing.csv")
+```
+
+To predict the manner in which they did the exercise, the "classe" variable in the training set should be predicted using any of the other variables. 
+
+### 2. Cleaning and Selection of Features
+
+Basic exploratory analysis can be done using the functions head ( ), tail ( ), str ( ), summary ( ) etc. It is ignored here due to space constraints. It reveals that lot of columns have NAs. These variables do not add value to the model fit and are to be removed. Since complete.cases ( ) gives observations/rows which have no missing values across the entire sequence, we cannot use it for columns here. So is.na ( ) is used over the data sets and column sums is calculted for the presence of NAs. This condition is used to subset the original data. 
+
+``` {r cleaning1}
+training2 <- training [ ,colSums(is.na(training)) == 0]
+quiztesting2 <- quiztesting [ ,colSums(is.na(quiztesting)) == 0]
+```
+
+Now viewing the data columns reveals that the first few columns are variables for understanding purpose and that they are not the independent variables upon which classe depends. So they are removed from the above data sets. 
+
+```{r cleaning2}
+training3 <- training2 [ ,8:93]
+quiztesting3 <- quiztesting2 [ ,8:60]
+```
+
+There are still a lot of variables in the data (using the dim ( ) function we can find the dimensions of the dataframe). So we can find the less impacting variables using the nearZeroVar ( ) function in caret package and remove them from the above training data set by subsetting. 
+
+```{r cleaning3}
+library (caret)
+nzv <- nearZeroVar(training3)
+training4 <- training3 [ ,-nzv]
+```
+
+```{r dimensions}
+dim (training4)
+dim (quiztesting3)
+```
+
+Now both of our original datasets come down to 52 independent variables upon which classe depends. 
+
+### 3. Data Splicing 
+Data Splicing can be done by using the function createDataPartition ( ) in the caret package. The training4 dataset is partitioned, by subsetting, into training5 and testing data sets for fitting and validating respectively. 
+
+``` {r splicing}
+partition <- createDataPartition(y=training4$classe, p = 0.8, list = FALSE)
+training5 <- training4 [partition, ]
+testing <- training4 [-partition, ]
+```
+
+### 4. Fitting a model
+There are many methods for model fitting viz., linear method, general linear method, classification trees, bagging, random forests, boosting, model based method etc. The random forest method is chosen as it was suggested by the instructor as the most widey used model fit in the Data Scientists community for its versatility and accuracy. 
+
+A simple fit using the train ( ) function with just the variables info, input data and method type was tried. But it was taking a lot of time for execution.  
+
+To improve performance of random forest in caret, parallel implementation as suggested by Len Greski was used.
+In this process 
+
+- First the Cores in the computer are detected and one minus available is alloted for the process. The detectCores ( ) function, makeCluster ( ), registerDoParallel ( ) in the parallel and doParallel packages are used. 
+- Secondly, trainControl ( ) function is configured with Resampling method as K- Fold Cross Validation with 5 folds. (My laptop has similar configuration as the tested HP Envy X2 tablet. So to half the time of tested 74 minutes, I decreased number of folds from 10 to 5. It took around 35 minutes. However the accuracy was targeted for 99% and it was acheived.)
+- Now the model is fit using the train ( ) in caret package
+- Finally cores allocation is stopped using the stopCluster ( ) and registerDoSEQ ( ) functions.
+
+A detailed and good explanation of the process is available here: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
+
+``` {r fitting}
+set.seed (2608)
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
+
+fit <- train (classe ~ ., data = training5, method="rf", trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+````
+
+The details and accuracy of the above model fit can be found by extracting the finalModel parameter on fit. 
+
+``` {r accuracy}
+fit$finalModel
+```
+
+Thus the accuracy of the fit was > 99% and In Sample Error (OOB estimate of  error rate) was < 1%
+
+### 5. Predicting using the model
+
+Using the above model fit, we can predict the classe values of above partitioned testing data to find the Out Sample Error. The predict ( ) fucntion and confusionMatrix ( ) functions in the caret package are used to predict and find accuracy respectively. 
+
+```{r testing}
+pred <- predict (fit, newdata = testing)
+confusionMatrix(testing$classe, pred)
+```
+
+The accuracy of the prediction was > 99% and Out Sample Error was < 1%
+
+## Results
+
+Now we can predict the quiz testing data using our model fit similar to the above step using the predict ( ) fucntion. The predicted values are printed below in the same sequence.
+
+```{r quiztesting}
+quizpred <- predict (fit, newdata = quiztesting3)
+quizpred
+```
+
+## Appendix:
+### Figure 1: Plotting the fit
+
+```{r plotfit}
+plot (fit)
+```
+
+### Figure 2: Plotting the finalModel
+
+```{r plotfinalModel}
+plot (fit$finalModel)
+```
+
+### Getting a single tree: 
+
+To view a single tree we can use the R Code: getTree (fit$finalModel, k=1). It is ignored here due to space constraints. 
+
+
+
+
+
+
